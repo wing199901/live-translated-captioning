@@ -1,6 +1,7 @@
 import asyncio
+from collections import defaultdict
 import logging
-from typing import Dict
+from typing import AsyncIterable, Dict
 
 from dotenv import load_dotenv
 from livekit import rtc
@@ -11,6 +12,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,
     stt,
+    llm,
     transcription,
 )
 from livekit.plugins import openai, silero, deepgram
@@ -18,6 +20,92 @@ from livekit.plugins import openai, silero, deepgram
 load_dotenv()
 
 logger = logging.getLogger("transcriber")
+
+
+class QueueManager:
+    def __init__(self):
+        self.subscribers = defaultdict(asyncio.Queue)
+
+    async def publish(self, message):
+        """Publish a message to all subscribers."""
+        for queue in self.subscribers.values():
+            await queue.put(message)
+
+    def subscribe(self, key):
+        """Subscribe to the manager and get a private queue."""
+        return self.subscribers[key]
+
+    def unsubscribe(self, key):
+        """Unsubscribe and remove the private queue."""
+        if key in self.subscribers:
+            del self.subscribers[key]
+
+
+queue_manager = QueueManager()
+
+
+async def forward_transcription(stt_stream, stt_forwarder):
+    """Forward transcription and publish messages to all subscribers."""
+    async for ev in stt_stream:
+        if ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
+            text = ev.alternatives[0].text
+            await queue_manager.publish(text)
+        stt_forwarder.update(ev)
+
+
+async def process_text_for_listener(
+    listener_key, language, local_participant: rtc.LocalParticipant
+):
+    """Process texts for a specific listener."""
+    queue = queue_manager.subscribe(language)
+    initial_ctx = llm.ChatContext().append(
+        role="system",
+        text=(
+            f"You are a translator for language: {language}"
+            f"Your only response should be the exact translation of input text in {language} language ."
+        ),
+    )
+    local_llm = openai.LLM()
+    llm_stream = local_llm.chat(chat_ctx=initial_ctx)
+    try:
+        while True:
+            text = await queue.get()
+            should_send = await participant_manager.get_transcription_forward_value(
+                listener_key
+            )
+            if should_send:
+                identities = await participant_manager.keys_with_language(language)
+                if not language == "english":
+                    new_chat_context = llm_stream.chat_ctx.append(text=text)
+                    llm_stream = local_llm.chat(chat_ctx=new_chat_context)
+                    translated_message = ""
+                    async for chunk in llm_stream:
+                        content = chunk.choices[0].delta.content
+                        if content is None:
+                            break
+                        translated_message += content
+                    await local_participant.publish_data(
+                        payload=translated_message,
+                        reliable=True,
+                        destination_identities=identities,
+                    )
+                else:
+                    await local_participant.publish_data(
+                        payload=text, reliable=True, destination_identities=identities
+                    )
+
+                logger.info(
+                    f"Transcription for participant {listener_key} (lang: {language}): {text}"
+                )
+
+            else:
+                logger.info(
+                    f"Ignoring transcription for participant: {listener_key} (lang: {language})"
+                )
+    except asyncio.CancelledError:
+        logger.info(f"Task for listener {listener_key} cancelled.")
+    finally:
+        queue_manager.unsubscribe(language)
 
 
 class ParticipantState:
@@ -30,7 +118,7 @@ class ParticipantState:
         async with self._lock:
             self._forward_transcription = should_forward
             self._transcription_language = language
-            logger.info(f"State updated: forward={should_forward}")
+            logger.info(f"participant state updated: forward={should_forward}")
 
     async def set_forward_transcription(self, should_forward: bool):
         async with self._lock:
@@ -59,7 +147,7 @@ class ParticipantManager:
             return self._states[key]
 
     async def set_transcription_forward_value(
-        self, key: str, should_forward_transcription: bool, transcription_language: str
+        self, key: str, should_forward_transcription: bool
     ):
         state = await self.get_state(key)
         await state.set_forward_transcription(should_forward_transcription)
@@ -97,27 +185,20 @@ class ParticipantManager:
                     return True
             return False
 
+    async def keys_with_language(self, language: str) -> list[str]:
+        """Get all keys with the given transcription language with forward transcription enabled."""
+        keys = []
+        async with self._lock:
+            for key, state in self._states.items():
+                if (
+                    await state.get_transcription_language() == language
+                    and await state.get_should_forward_transcription()
+                ):
+                    keys.append(key)
+        return keys
+
 
 participant_manager = ParticipantManager()
-
-
-async def forward_transcription(
-    stt_stream: stt.SpeechStream,
-    stt_forwarder: transcription.STTSegmentsForwarder,
-    language: str,
-):
-    """Forward transcription to clients and log the transcript."""
-    async for ev in stt_stream:
-        if ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
-            async for key, state in participant_manager.loop_states():
-                if await state.get_should_forward_transcription():
-                    logger.info(
-                        f"Transcription for participant {key} (lang: {language}): {ev.alternatives[0].text}"
-                    )
-                    # Send data message
-                else:
-                    logger.info(f"Ignoring transcription for participant: {key}")
-        stt_forwarder.update(ev)
 
 
 def str_to_bool(string: str) -> bool:
@@ -128,14 +209,6 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"Starting transcriber (STT) for room: {ctx.room.name}")
     stt = deepgram.STT()
     stt_stream = stt.stream()
-
-    # stt_impl = openai.STT()
-
-    # if not stt_impl.capabilities.streaming:
-    #     stt_impl = stt.StreamAdapter(
-    #         stt=stt_impl,
-    #         vad=silero.VAD.load(min_silence_duration=0.2),
-    #     )
 
     stt_forwarder = None
 
@@ -150,15 +223,18 @@ async def entrypoint(ctx: JobContext):
                 logger.info(
                     f"Adding transcription task for language: {transcription_language}"
                 )
+                listener_key = participant.identity
+
                 asyncio.create_task(
-                    forward_transcription(
-                        stt_stream, stt_forwarder, transcription_language
+                    process_text_for_listener(
+                        listener_key, transcription_language, ctx.room.local_participant
                     )
                 )
 
             await participant_manager.set_participant_state(
                 participant.identity, should_forward, transcription_language
             )
+
         except Exception as e:
             logger.error(
                 f"Error adding participant {participant.identity} to state: {e}",
@@ -172,7 +248,7 @@ async def entrypoint(ctx: JobContext):
             stt_forwarder = transcription.STTSegmentsForwarder(
                 room=ctx.room, participant=participant, track=track
             )
-            # stt_stream = stt_impl.stream()
+            asyncio.create_task(forward_transcription(stt_stream, stt_forwarder))
 
             async for ev in audio_stream:
                 stt_stream.push_frame(ev.frame)

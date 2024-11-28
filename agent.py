@@ -299,8 +299,4 @@ async def request_fnc(req: JobRequest):
 
 
 if __name__ == "__main__":
-    cli.run_app(
-        WorkerOptions(
-            entrypoint_fnc=entrypoint, agent_name="test-agent", request_fnc=request_fnc
-        )
-    )
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, request_fnc=request_fnc))

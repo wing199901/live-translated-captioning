@@ -13,7 +13,7 @@ from livekit.agents import (
     stt,
     transcription,
 )
-from livekit.plugins import openai, silero
+from livekit.plugins import openai, silero, deepgram
 
 load_dotenv()
 
@@ -26,7 +26,13 @@ class ParticipantState:
         self._transcription_language = "english"
         self._lock = asyncio.Lock()
 
-    async def set_participant_state(self, should_forward: bool):
+    async def set_participant_state(self, should_forward: bool, language: str):
+        async with self._lock:
+            self._forward_transcription = should_forward
+            self._transcription_language = language
+            logger.info(f"State updated: forward={should_forward}")
+
+    async def set_forward_transcription(self, should_forward: bool):
         async with self._lock:
             self._forward_transcription = should_forward
             logger.info(f"State updated: forward={should_forward}")
@@ -53,10 +59,18 @@ class ParticipantManager:
             return self._states[key]
 
     async def set_transcription_forward_value(
-        self, key: str, should_forward_transcription: bool
+        self, key: str, should_forward_transcription: bool, transcription_language: str
     ):
         state = await self.get_state(key)
-        await state.set_participant_state(should_forward_transcription)
+        await state.set_forward_transcription(should_forward_transcription)
+
+    async def set_participant_state(
+        self, key: str, should_forward_transcription: bool, transcription_language: str
+    ):
+        state = await self.get_state(key)
+        await state.set_participant_state(
+            should_forward_transcription, transcription_language
+        )
 
     async def get_transcription_forward_value(self, key: str) -> bool:
         state = await self.get_state(key)
@@ -100,7 +114,7 @@ async def forward_transcription(
                     logger.info(
                         f"Transcription for participant {key} (lang: {language}): {ev.alternatives[0].text}"
                     )
-                    # translate and send data message
+                    # Send data message
                 else:
                     logger.info(f"Ignoring transcription for participant: {key}")
         stt_forwarder.update(ev)
@@ -112,16 +126,18 @@ def str_to_bool(string: str) -> bool:
 
 async def entrypoint(ctx: JobContext):
     logger.info(f"Starting transcriber (STT) for room: {ctx.room.name}")
-    stt_impl = openai.STT()
+    stt = deepgram.STT()
+    stt_stream = stt.stream()
 
-    if not stt_impl.capabilities.streaming:
-        stt_impl = stt.StreamAdapter(
-            stt=stt_impl,
-            vad=silero.VAD.load(min_silence_duration=0.2),
-        )
+    # stt_impl = openai.STT()
+
+    # if not stt_impl.capabilities.streaming:
+    #     stt_impl = stt.StreamAdapter(
+    #         stt=stt_impl,
+    #         vad=silero.VAD.load(min_silence_duration=0.2),
+    #     )
 
     stt_forwarder = None
-    stt_stream = None
 
     async def add_participant_to_state(participant: rtc.RemoteParticipant):
         try:
@@ -140,7 +156,7 @@ async def entrypoint(ctx: JobContext):
                     )
                 )
 
-            await participant_manager.set_transcription_forward_value(
+            await participant_manager.set_participant_state(
                 participant.identity, should_forward, transcription_language
             )
         except Exception as e:
@@ -156,7 +172,7 @@ async def entrypoint(ctx: JobContext):
             stt_forwarder = transcription.STTSegmentsForwarder(
                 room=ctx.room, participant=participant, track=track
             )
-            stt_stream = stt_impl.stream()
+            # stt_stream = stt_impl.stream()
 
             async for ev in audio_stream:
                 stt_stream.push_frame(ev.frame)

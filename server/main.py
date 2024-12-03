@@ -47,6 +47,7 @@ class Translator:
     async def translate(self, message: str, track: rtc.Track):
         self.context.append(text=message, role="user")
         stream = self.llm.chat(chat_ctx=self.context)
+
         translated_message = ""
         async for chunk in stream:
             content = chunk.choices[0].delta.content
@@ -99,12 +100,6 @@ async def entrypoint(job: JobContext):
                 message = ev.alternatives[0].text
                 for translator in translators.values():
                     asyncio.create_task(translator.translate(message, track))
-
-                # translation_tasks = [
-                #     asyncio.create_task(translator.translate(message, track))
-                #     for translator in translators.values()
-                # ]
-                # await asyncio.gather(*translation_tasks)
 
     async def transcribe_track(participant: rtc.RemoteParticipant, track: rtc.Track):
         audio_stream = rtc.AudioStream(track)

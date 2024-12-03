@@ -16,11 +16,7 @@ interface Language {
   flag: string;
 }
 
-interface LanguageSelectProps {
-  disabled: boolean;
-}
-
-const LanguageSelect = ({ disabled = false }: LanguageSelectProps) => {
+const LanguageSelect = () => {
   const room = useRoomContext();
   const { state, dispatch } = usePartyState();
 
@@ -47,7 +43,7 @@ const LanguageSelect = ({ disabled = false }: LanguageSelectProps) => {
       <Select
         value={state.captionsLanguage}
         onValueChange={handleChange}
-        disabled={disabled}
+        disabled={!state.captionsEnabled}
       >
         <SelectTrigger className="w-[180px]">
           <SelectValue placeholder="Theme" />

@@ -37,7 +37,7 @@ Here's what's happening in this demo:
 - There's a couple known bugs at the moment:
   -  Sometimes joining as a listener ends up showing the agent as the host and things look broken. A refresh and rejoin should fix it.
   -  Opening more than one browser window and connecting a host and one-or-more listeners somehow degrades STT performance. Not sure why yet.
-- You can easily extend this demo to support other languages by... TK I'm going to make this easier to do.
+- You can easily extend this demo to support other languages by editing the [list of languages](https://github.com/livekit-examples/live-translated-captioning/blob/2e7acc16e7e482d4c34d7b6673343e5b33f96455/server/main.py#L36) in the agent code.
 
 ## Misc
 For a more general overview of LiveKit Agents and the full set of capabilities, documentation is here: [https://docs.livekit.io/agents/](https://docs.livekit.io/agents/)

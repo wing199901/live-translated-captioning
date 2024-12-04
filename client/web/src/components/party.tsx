@@ -73,7 +73,7 @@ export default function Party() {
           </div>
         )}
       </div>
-      <RoomAudioRenderer />
+      {/* <RoomAudioRenderer /> */}
     </div>
   );
 }

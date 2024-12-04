@@ -1,13 +1,16 @@
 import asyncio
 import logging
+import json
 
 from enum import Enum
+from dataclasses import dataclass
 
 from livekit import rtc
 from livekit.agents import (
     AutoSubscribe,
     JobContext,
     JobProcess,
+    JobRequest,
     WorkerOptions,
     cli,
     stt,
@@ -23,16 +26,29 @@ load_dotenv()
 logger = logging.getLogger("transcriber")
 
 
-class Language(Enum):
-    es = "Spanish"
-    en = "English"
-    de = "German"
-    ja = "Japanese"
-    fr = "French"
+@dataclass
+class Language:
+    code: str
+    name: str
+    flag: str
+
+
+languages = {
+    "en": Language(code="en", name="English", flag="🇺🇸"),
+    "es": Language(code="es", name="Spanish", flag="🇪🇸"),
+    "fr": Language(code="fr", name="French", flag="🇫🇷"),
+    "de": Language(code="de", name="German", flag="🇩🇪"),
+    "ja": Language(code="ja", name="Japanese", flag="🇯🇵"),
+}
+
+LanguageCode = Enum(
+    "LanguageCode",  # Name of the Enum
+    {code: lang.name for code, lang in languages.items()},  # Enum entries
+)
 
 
 class Translator:
-    def __init__(self, room: rtc.Room, lang: Language):
+    def __init__(self, room: rtc.Room, lang: Enum):
         self.room = room
         self.lang = lang
         self.context = llm.ChatContext().append(
@@ -133,10 +149,10 @@ async def entrypoint(job: JobContext):
         When participant attributes change, handle new translation requests.
         """
         lang = changed_attributes.get("captions_language", None)
-        if lang and lang != Language.en.name and lang not in translators:
+        if lang and lang != LanguageCode.en.name and lang not in translators:
             try:
                 # Create a translator for the requested language
-                target_language = Language[lang].value
+                target_language = LanguageCode[lang].value
                 translators[lang] = Translator(job.room, Language[lang])
                 logger.info(f"Added translator for language: {target_language}")
             except KeyError:
@@ -144,6 +160,21 @@ async def entrypoint(job: JobContext):
 
     await job.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
+    @job.room.local_participant.register_rpc_method("get/languages")
+    async def get_languages(data: rtc.RpcInvocationData):
+        return json.dumps(languages.values())
+
+
+async def request_fnc(req: JobRequest):
+    await req.accept(
+        name="agent",
+        identity="agent",
+    )
+
 
 if __name__ == "__main__":
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm))
+    cli.run_app(
+        WorkerOptions(
+            entrypoint_fnc=entrypoint, prewarm_fnc=prewarm, request_fnc=request_fnc
+        )
+    )

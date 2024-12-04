@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 import {
   Select,
@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/select";
 import { useRoomContext } from "@livekit/components-react";
 import { usePartyState } from "@/hooks/usePartyState";
+import { ConnectionState } from "livekit-client";
 
 interface Language {
   code: string;
@@ -19,14 +20,7 @@ interface Language {
 const LanguageSelect = () => {
   const room = useRoomContext();
   const { state, dispatch } = usePartyState();
-
-  const languages: Language[] = [
-    { code: "en", name: "American English", flag: "🇺🇸" },
-    { code: "es", name: "Spanish", flag: "🇪🇸" },
-    { code: "fr", name: "French", flag: "🇫🇷" },
-    { code: "de", name: "German", flag: "🇩🇪" },
-    { code: "ja", name: "Japanese", flag: "🇯🇵" },
-  ];
+  const [languages, setLanguages] = useState<Language[]>([]);
 
   const handleChange = async (value: string) => {
     dispatch({
@@ -38,6 +32,26 @@ const LanguageSelect = () => {
     });
   };
 
+  useEffect(() => {
+    async function getLanguages() {
+      try {
+        const response = await room.localParticipant.performRpc({
+          destinationIdentity: "agent",
+          method: "get/languages",
+          payload: "",
+        });
+        const languages = JSON.parse(response);
+        setLanguages(languages);
+      } catch (error) {
+        console.error("RPC call failed: ", error);
+      }
+    }
+
+    if (room && room.state === ConnectionState.Connected) {
+      getLanguages();
+    }
+  }, [room]);
+
   return (
     <div className="flex items-center">
       <Select
@@ -46,7 +60,7 @@ const LanguageSelect = () => {
         disabled={!state.captionsEnabled}
       >
         <SelectTrigger className="w-[180px]">
-          <SelectValue placeholder="Theme" />
+          <SelectValue placeholder="Captions language" />
         </SelectTrigger>
         <SelectContent>
           {languages.map((lang) => (

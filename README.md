@@ -2,6 +2,12 @@
 
 This is a demo of a LiveKit agent that connects to a live streaming session and automatically transcribes and translates the host's speech into text captions for a target language. Every listener that connects to the session can set their preferred language and receive live captions of the host in that language.
 
+It uses:
+- 🌐 [LiveKit](https://github.com/livekit/livekit) for transport
+- 🤖 [LiveKit Agents](https://github.com/livekit/agents) for the backend
+- 👂 [Deepgram](https://deepgram.com) STT for transcriptions
+- 🌍 [OpenAI GPT-4o](https://platform.openai.com/) for translations
+
 ## Under the hood
 
 Here's what's happening in this demo:

@@ -3,7 +3,7 @@ import logging
 import json
 
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 from livekit import rtc
 from livekit.agents import (
@@ -153,7 +153,7 @@ async def entrypoint(job: JobContext):
             try:
                 # Create a translator for the requested language
                 target_language = LanguageCode[lang].value
-                translators[lang] = Translator(job.room, Language[lang])
+                translators[lang] = Translator(job.room, LanguageCode[lang])
                 logger.info(f"Added translator for language: {target_language}")
             except KeyError:
                 logger.warning(f"Unsupported language requested: {lang}")
@@ -162,7 +162,8 @@ async def entrypoint(job: JobContext):
 
     @job.room.local_participant.register_rpc_method("get/languages")
     async def get_languages(data: rtc.RpcInvocationData):
-        return json.dumps(languages.values())
+        languages_list = [asdict(lang) for lang in languages.values()]
+        return json.dumps(languages_list)
 
 
 async def request_fnc(req: JobRequest):

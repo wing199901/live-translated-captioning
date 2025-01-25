@@ -26,7 +26,7 @@ Here's what's happening in this demo:
 2. `python -m venv .venv`
 3. `source .venv/bin/activate`
 4. `pip install -r requirements.txt`
-5. `cp server/.env.example server/.env`
+5. `cp .env.example .env`
 6. add values for keys in `.env`
 7. `python main.py dev`
 

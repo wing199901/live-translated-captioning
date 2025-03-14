@@ -8,10 +8,12 @@ from dataclasses import dataclass, asdict
 from livekit import rtc
 from livekit.agents import (
     JobContext,
+    JobProcess,
     WorkerOptions,
     cli,
     stt,
     llm,
+    utils,
 )
 from livekit.agents.voice.room_io import RoomInputOptions
 from livekit.agents.voice import Agent, AgentSession
@@ -46,9 +48,9 @@ LanguageCode = Enum(
 
 class Translator:
     """Handles real-time translation of transcribed text to target languages."""
-    def __init__(self, session: AgentSession, lang: Enum):
+    def __init__(self, room: rtc.Room, lang: Enum):
         """Initialize translator for a specific language."""
-        self.session = session
+        self.room = room
         self.lang = lang
         self.context = llm.ChatContext().add_message(
             role="system",
@@ -67,7 +69,7 @@ class Translator:
         # )
         # self.llm = openai.LLM()
 
-    async def translate(self, message: str):
+    async def translate(self, message: str, track: rtc.Track):
         """Translate message to target language and publish transcription."""
         self.context.append(text=message, role="user")
         stream = self.llm.chat(chat_ctx=self.context)
@@ -79,102 +81,133 @@ class Translator:
                 break
             translated_message += content
 
-        await self.session.publish_transcription(
+        segment = rtc.TranscriptionSegment(
+            id=utils.misc.shortuuid("SG_"),
             text=translated_message,
+            start_time=0,
+            end_time=0,
             language=self.lang.name,
-            final=True
+            final=True,
         )
-
-        logger.info("%s: message: %s, translated to %s: %s", self.session.local_participant.identity, message, self.lang.value, translated_message)
-
-
-class TranslationAgent(Agent):
-    """Main agent that manages audio transcription and multilingual translation."""
-    def __init__(self) -> None:
-        super().__init__(
-            instructions="You are Echo.",
-            stt=deepgram.STT(),
-            vad=silero.VAD.load(),
-            llm=openai.LLM(model="gpt-4o-mini"),
-            tts=cartesia.TTS(),
+        transcription = rtc.Transcription(
+            self.room.local_participant.identity, track.sid, [segment]
         )
-        self.translators = {}
+        await self.room.local_participant.publish_transcription(transcription)
 
-    # def __init__(self):
-    #     # super().__init__(
-    #     #     stt=deepgram.STT(),
-    #     #     vad=silero.VAD.load(),
-    #     #     llm=openai.LLM(),
-    #     # )
-    #     self.translators = {}
+        logger.info(f"message: {message}, translated to {self.lang.value}: {translated_message}")
 
-    async def on_start(self, session: AgentSession):
-        """Initialize agent session with RPC methods and event handlers."""
-        # Register RPC method
-        @session.local_participant.register_rpc_method("get/languages")
-        async def get_languages(data: rtc.RpcInvocationData):
-            logger.info("%s: get_languages %s", session.local_participant.identity, data)
-            languages_list = [asdict(lang) for lang in languages.values()]
-            return json.dumps(languages_list)
 
-        # Handle existing participants
-        for participant in session.room.remote_participants.values():
-            self._setup_participant(participant)
 
-        # Set up event handlers
-        session.room.on("track_subscribed", self._on_track_subscribed)
-        session.room.on("participant_attributes_changed", self._on_attributes_changed)
+# class TranslationAgent(Agent):
+#     """Main agent that manages audio transcription and multilingual translation."""
+#     def __init__(self, room: rtc.Room) -> None:
+#         super().__init__(
+#             instructions="You are Echo.",
+#             stt=deepgram.STT(),
+#             vad=silero.VAD.load(),
+#             llm=openai.LLM(model="gpt-4o-mini"),
+#             tts=cartesia.TTS(),
+#         )
+#         self.translators = {}
+#         self.room = room
 
-    def _setup_participant(self, participant: rtc.RemoteParticipant):
-        if participant.identity == self.session.local_participant.identity:
-            return
+#     async def on_start(self, session: AgentSession):
+#         """Initialize agent session with RPC methods and event handlers."""
+       
 
-        # Set up audio track handling
-        for pub in participant.tracks.values():
-            if pub.track and pub.kind == rtc.TrackKind.KIND_AUDIO:
-                asyncio.create_task(self._transcribe_track(participant, pub.track))
+#     def _setup_participant(self, participant: rtc.RemoteParticipant):
+#        """Set up participant for translation."""
 
-    async def _transcribe_track(self, participant: rtc.RemoteParticipant, track: rtc.Track):
-        audio_stream = rtc.AudioStream(track)
-        async for frame in audio_stream:
-            self.stt.push_frame(frame)
 
-    def _on_track_subscribed(self, track: rtc.Track, publication: rtc.TrackPublication, 
-                           participant: rtc.RemoteParticipant):
-        if track.kind == rtc.TrackKind.KIND_AUDIO:
-            logger.info("%s: Adding transcriber for participant: %s", publication.identity, participant.identity)
-            asyncio.create_task(self._transcribe_track(participant, track))
-
-    def _on_attributes_changed(self, changed_attributes: dict[str, str], participant: rtc.Participant):
-        lang = changed_attributes.get("captions_language", None)
-        if lang and lang != LanguageCode.en.name and lang not in self.translators:
-            try:
-                target_language = LanguageCode[lang].value
-                self.translators[lang] = Translator(self.session, LanguageCode[lang])
-                logger.info("%s: Added translator for language: %s", participant.identity, target_language)
-            except KeyError:
-                logger.warning("%s: Unsupported language requested: %s", participant.identity, lang)
-
-    async def on_stt_event(self, event: stt.SpeechEvent):
-        """Handle STT events and forward final transcripts to translators."""
-        if event.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
-            message = event.alternatives[0].text
-            for translator in self.translators.values():
-                asyncio.create_task(translator.translate(message))
-
+def prewarm(proc: JobProcess):
+    """Preload VAD model to accelerate agent initialization."""
+    proc.userdata["vad"] = silero.VAD.load()
 
 async def entrypoint(ctx: JobContext):
     """Main entrypoint for the translation agent service."""
+    stt_provider = deepgram.STT()
+    tasks = []
+    translators = {}
+
+    async def _forward_transcription(
+        stt_stream: stt.SpeechStream,
+        stt_forwarder: transcription.STTSegmentsForwarder,
+        track: rtc.Track,
+    ):
+        """Forward the transcription and log the transcript in the console"""
+        async for ev in stt_stream:
+            stt_forwarder.update(ev)
+            # log to console
+            if ev.type == stt.SpeechEventType.INTERIM_TRANSCRIPT:
+                print(ev.alternatives[0].text, end="")
+            elif ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
+                print("\n")
+                print(" -> ", ev.alternatives[0].text)
+
+                message = ev.alternatives[0].text
+                for translator in translators.values():
+                    asyncio.create_task(translator.translate(message, track))
+
+    async def transcribe_track(participant: rtc.RemoteParticipant, track: rtc.Track):
+        audio_stream = rtc.AudioStream(track)
+        stt_forwarder = transcription.STTSegmentsForwarder(
+            room=ctx.room, participant=participant, track=track
+        )
+        stt_stream = stt_provider.stream()
+        stt_task = asyncio.create_task(
+            _forward_transcription(stt_stream, stt_forwarder, track)
+        )
+        tasks.append(stt_task)
+
+        async for ev in audio_stream:
+            stt_stream.push_frame(ev.frame)
+
+    @ctx.room.on("track_subscribed")
+    def on_track_subscribed(
+        track: rtc.Track,
+        publication: rtc.TrackPublication,
+        participant: rtc.RemoteParticipant,
+    ):
+        if track.kind == rtc.TrackKind.KIND_AUDIO:
+            logger.info(f"Adding transcriber for participant: {participant.identity}")
+            tasks.append(asyncio.create_task(transcribe_track(participant, track)))
+
+    @ctx.room.on("participant_attributes_changed")
+    def on_attributes_changed(
+        changed_attributes: dict[str, str], participant: rtc.Participant
+    ):
+        """
+        When participant attributes change, handle new translation requests.
+        """
+        lang = changed_attributes.get("captions_language", None)
+        if lang and lang != LanguageCode.en.name and lang not in translators:
+            try:
+                # Create a translator for the requested language
+                target_language = LanguageCode[lang].value
+                translators[lang] = Translator(ctx.room, LanguageCode[lang])
+                logger.info(f"Added translator for language: {target_language}")
+            except KeyError:
+                logger.warning(f"Unsupported language requested: {lang}")
+
+
     await ctx.connect()
+
+    @ctx.room.local_participant.register_rpc_method("get/languages")
+    async def get_languages(data: rtc.RpcInvocationData):
+        languages_list = [asdict(lang) for lang in languages.values()]
+        return json.dumps(languages_list)
     
-    session = AgentSession()
-    await session.start(
-        agent=TranslationAgent(),
-        room=ctx.room,
-        room_input_options=RoomInputOptions(),
-            # auto_subscribe=rtc.AutoSubscribe.AUDIO_ONLY
-    )
+    # session = AgentSession()
+    # await session.start(
+    #     agent=TranslationAgent(ctx.room),
+    #     room=ctx.room,
+    #     room_input_options=RoomInputOptions(),
+    # )
+
 
 
 if __name__ == "__main__":
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+    cli.run_app(WorkerOptions(
+        entrypoint_fnc=entrypoint,
+        prewarm_fnc=prewarm,
+    ))

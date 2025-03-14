@@ -199,14 +199,6 @@ async def entrypoint(ctx: JobContext):
         languages_list = [asdict(lang) for lang in languages.values()]
         return json.dumps(languages_list)
     
-    # session = AgentSession()
-    # await session.start(
-    #     agent=TranslationAgent(ctx.room),
-    #     room=ctx.room,
-    #     room_input_options=RoomInputOptions(),
-    # )
-
-
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(

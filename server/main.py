@@ -9,6 +9,7 @@ from livekit import rtc
 from livekit.agents import (
     JobContext,
     JobProcess,
+    JobRequest,
     WorkerOptions,
     cli,
     stt,
@@ -59,14 +60,6 @@ class Translator:
             ),
         )
         self.llm = openai.LLM()
-        # self.context = llm.ChatContext().append(
-        #     role="system",
-        #     text=(
-        #         f"You are a translator for language: {lang.value}"
-        #         f"Your only response should be the exact translation of input text in the {lang.value} language ."
-        #     ),
-        # )
-        # self.llm = openai.LLM()
 
     async def translate(self, message: str, track: rtc.Track):
         """Translate message to target language and publish transcription."""
@@ -80,6 +73,9 @@ class Translator:
                 break
             translated_message += content
 
+        print("======== translate ==========")
+        print(translated_message)
+        print("======== translate ==========")
         segment = rtc.TranscriptionSegment(
             id=utils.misc.shortuuid("SG_"),
             text=translated_message,
@@ -95,27 +91,6 @@ class Translator:
 
         logger.info(f"message: {message}, translated to {self.lang.value}: {translated_message}")
 
-
-
-# class TranslationAgent(Agent):
-#     """Main agent that manages audio transcription and multilingual translation."""
-#     def __init__(self, room: rtc.Room) -> None:
-#         super().__init__(
-#             instructions="You are Echo.",
-#             stt=deepgram.STT(),
-#             vad=silero.VAD.load(),
-#             llm=openai.LLM(model="gpt-4o-mini"),
-#             tts=cartesia.TTS(),
-#         )
-#         self.translators = {}
-#         self.room = room
-
-#     async def on_start(self, session: AgentSession):
-#         """Initialize agent session with RPC methods and event handlers."""
-       
-
-#     def _setup_participant(self, participant: rtc.RemoteParticipant):
-#        """Set up participant for translation."""
 
 
 def prewarm(proc: JobProcess):
@@ -196,12 +171,20 @@ async def entrypoint(ctx: JobContext):
 
     @ctx.room.local_participant.register_rpc_method("get/languages")
     async def get_languages(data: rtc.RpcInvocationData):
+        print("======== get_languages ==========")
         languages_list = [asdict(lang) for lang in languages.values()]
         return json.dumps(languages_list)
-    
+  
+async def request_fnc(req: JobRequest):
+    """Handle incoming job requests by accepting them."""
+    await req.accept(
+        name="agent",
+        identity="agent",
+    )
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
         prewarm_fnc=prewarm,
+        request_fnc=request_fnc
     ))

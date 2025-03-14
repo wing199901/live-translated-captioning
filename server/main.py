@@ -15,9 +15,7 @@ from livekit.agents import (
     llm,
     utils,
 )
-from livekit.agents.voice.room_io import RoomInputOptions
-from livekit.agents.voice import Agent, AgentSession
-from livekit.plugins import openai, deepgram, silero, cartesia
+from livekit.plugins import openai, deepgram, silero
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -27,6 +25,7 @@ logger = logging.getLogger("transcriber")
 
 @dataclass
 class Language:
+    """Represents a language with its code, name, and flag emoji."""
     code: str
     name: str
     flag: str
@@ -131,12 +130,14 @@ async def entrypoint(ctx: JobContext):
 
     async def _forward_transcription(
         stt_stream: stt.SpeechStream,
-        stt_forwarder: transcription.STTSegmentsForwarder,
+        stt_forwarder: None,
+        #stt_forwarder: transcription.STTSegmentsForwarder,
         track: rtc.Track,
     ):
         """Forward the transcription and log the transcript in the console"""
         async for ev in stt_stream:
-            stt_forwarder.update(ev)
+            print(ev)
+            #stt_forwarder.update(ev)
             # log to console
             if ev.type == stt.SpeechEventType.INTERIM_TRANSCRIPT:
                 print(ev.alternatives[0].text, end="")
@@ -150,9 +151,10 @@ async def entrypoint(ctx: JobContext):
 
     async def transcribe_track(participant: rtc.RemoteParticipant, track: rtc.Track):
         audio_stream = rtc.AudioStream(track)
-        stt_forwarder = transcription.STTSegmentsForwarder(
-            room=ctx.room, participant=participant, track=track
-        )
+        stt_forwarder = None 
+        # stt_forwarder = transcription.STTSegmentsForwarder(
+        #     room=ctx.room, participant=participant, track=track
+        # )
         stt_stream = stt_provider.stream()
         stt_task = asyncio.create_task(
             _forward_transcription(stt_stream, stt_forwarder, track)

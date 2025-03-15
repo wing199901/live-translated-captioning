@@ -1,3 +1,6 @@
+"""Real-time speech to translated captions service using LiveKit Agents framework.
+Supports multiple languages and provides live captioning capabilities."""
+
 import asyncio
 import logging
 import json
@@ -23,7 +26,6 @@ load_dotenv()
 
 logger = logging.getLogger("transcriber")
 
-
 @dataclass
 class Language:
     """Represents a language with its code, name, and flag emoji."""
@@ -31,12 +33,11 @@ class Language:
     name: str
     flag: str
 
-
 languages = {
     "en": Language(code="en", name="English", flag="🇺🇸"),
+    "de": Language(code="de", name="German", flag="🇩🇪"),
     "es": Language(code="es", name="Spanish", flag="🇪🇸"),
     "fr": Language(code="fr", name="French", flag="🇫🇷"),
-    "de": Language(code="de", name="German", flag="🇩🇪"),
     "ja": Language(code="ja", name="Japanese", flag="🇯🇵"),
 }
 
@@ -45,17 +46,14 @@ LanguageCode = Enum(
     {code: lang.name for code, lang in languages.items()},  # Enum entries
 )
 
-
 class Translator:
     """Handles real-time translation of transcribed text to target languages."""
     def __init__(self, room: rtc.Room, lang: Enum):
         """Initialize translator for a specific language."""
         self.room = room
         self.lang = lang
-        
-        # Create a ChatContext first
         self.context = llm.ChatContext()
-        # Then add the system message to it
+        
         self.context.add_message(
             role="system",
             content=f"You are a translator for language: {lang.value}. "
@@ -65,37 +63,33 @@ class Translator:
 
     async def translate(self, message: str, track: rtc.Track):
         """Translate message to target language and publish transcription."""
-        logger.info("aaaaaaaaaa translate(%s)", message)
 
         # Add the user message to the existing context
         self.context.add_message(
             role="user",
             content=message
         )
-        logger.info("self.context.append(: %s", message)
         
         stream = self.llm.chat(chat_ctx=self.context)
-        logger.info("bbbbbbbbbb translate(...) %s", stream)
 
         translated_message = ""
         try:
             async for chunk in stream:
-                logger.info("Processing chunk: %s", chunk)
-                
                 # Access delta directly from the chunk
                 if not chunk.delta or not chunk.delta.content:
                     continue
                     
                 translated_message += chunk.delta.content or ""
-                logger.info("Current translation: %s", translated_message)
                 
-        except Exception as e:
-            logger.error("Error processing translation stream: %s", str(e))
+        except (AttributeError, TypeError) as e:
+            logger.error("Error processing chunk format: %s", str(e))
             return
-
-        logger.info("======== translate ==========")
-        logger.info(translated_message)
-        logger.info("======== translate ==========")
+        except asyncio.CancelledError:
+            logger.error("Translation stream was cancelled")
+            raise
+        except IOError as e:
+            logger.error("Network error during translation: %s", str(e))
+            return
 
         segment = rtc.TranscriptionSegment(
             id=utils.misc.shortuuid("SG_"),
@@ -113,7 +107,6 @@ class Translator:
         logger.info(f"message: {message}, translated to {self.lang.value}: {translated_message}")
 
 
-
 def prewarm(proc: JobProcess):
     """Preload VAD model to accelerate agent initialization."""
     proc.userdata["vad"] = silero.VAD.load()
@@ -126,14 +119,11 @@ async def entrypoint(ctx: JobContext):
 
     async def _forward_transcription(
         stt_stream: stt.SpeechStream,
-        stt_forwarder: None,
-        #stt_forwarder: transcription.STTSegmentsForwarder,
         track: rtc.Track,
     ):
         """Forward the transcription and log the transcript in the console"""
         async for ev in stt_stream:
-            print(ev)
-            #stt_forwarder.update(ev)
+
             # log to console
             if ev.type == stt.SpeechEventType.INTERIM_TRANSCRIPT:
                 print(ev.alternatives[0].text, end="")
@@ -142,19 +132,14 @@ async def entrypoint(ctx: JobContext):
                 print(" -> ", ev.alternatives[0].text)
 
                 message = ev.alternatives[0].text
-                logger.info("get translators: %s", translators)
                 for translator in translators.values():
                     asyncio.create_task(translator.translate(message, track))
 
     async def transcribe_track(participant: rtc.RemoteParticipant, track: rtc.Track):
         audio_stream = rtc.AudioStream(track)
-        stt_forwarder = None 
-        # stt_forwarder = transcription.STTSegmentsForwarder(
-        #     room=ctx.room, participant=participant, track=track
-        # )
         stt_stream = stt_provider.stream()
         stt_task = asyncio.create_task(
-            _forward_transcription(stt_stream, stt_forwarder, track)
+            _forward_transcription(stt_stream, track)
         )
         tasks.append(stt_task)
 
@@ -175,32 +160,27 @@ async def entrypoint(ctx: JobContext):
     def on_attributes_changed(
         changed_attributes: dict[str, str], participant: rtc.Participant
     ):
-        logger.info("on_attributes_changed: %s", changed_attributes)
         """
         When participant attributes change, handle new translation requests.
         """
         lang = changed_attributes.get("captions_language", None)
-        logger.info("lang: %s", lang)
+
         if lang and lang != LanguageCode.en.name and lang not in translators:
             try:
-                logger.info("try: %s", lang)
                 # Create a translator for the requested language
                 target_language = LanguageCode[lang].value
                 translators[lang] = Translator(ctx.room, LanguageCode[lang])
-                logger.info("set translators: %s", translators)
                 logger.info(f"Added translator for language: {target_language}")
             except KeyError:
                 logger.warning(f"Unsupported language requested: {lang}")
-
 
     await ctx.connect()
 
     @ctx.room.local_participant.register_rpc_method("get/languages")
     async def get_languages(data: rtc.RpcInvocationData):
-        print("======== get_languages ==========")
         languages_list = [asdict(lang) for lang in languages.values()]
         return json.dumps(languages_list)
-  
+
 async def request_fnc(req: JobRequest):
     """Handle incoming job requests by accepting them."""
     await req.accept(

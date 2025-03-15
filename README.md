@@ -19,6 +19,53 @@ Here's what's happening in this demo:
 5. The translator will take the text from STT and pass it as part of a prompt to an LLM, asking the LLM to translate the text to the target language.
 6. The output from the LLM is then sent to users via STTForwarder and rendered by the client application.
 
+```mermaid
+sequenceDiagram
+    participant Host
+    participant Listeners
+    participant LiveKit Room
+    participant Agent
+    participant Deepgram STT
+    participant OpenAI GPT
+    
+    Host->>LiveKit Room: Join room & stream audio
+    Agent->>LiveKit Room: Subscribe to host's audio stream
+    
+    rect rgb(180, 180, 255)
+        note right of Listeners: Listener Language Setup Flow
+        Listeners->>LiveKit Room: Join room
+        Listeners->>Agent: RPC: get/languages
+        Agent-->>Listeners: Return available languages
+        Listeners->>LiveKit Room: Set language preference (captions_language attribute)
+        LiveKit Room->>Agent: Participant attributes changed
+        Note right of Agent: Create translator if needed
+    end
+    
+    
+    rect rgb(200, 220, 255)
+        note right of Host: Speech to Text Flow
+        Host->>Agent: Stream audio
+        Agent->>Deepgram STT: Forward audio frames
+        Deepgram STT-->>Agent: Return transcription (English)
+    end
+    
+    rect rgb(220, 255, 220)
+        note right of Agent: Translation Flow (Per Language)
+        loop For each unique target language
+            Agent->>OpenAI GPT: Send English text
+            OpenAI GPT-->>Agent: Return translated text
+        end
+    end
+    
+    rect rgb(255, 220, 220)
+        note right of Agent: Caption Distribution
+        Agent->>LiveKit Room: Publish English transcription
+        Agent->>LiveKit Room: Publish translations (one per language)
+        LiveKit Room->>Listeners: Route captions based on language preference
+        note right of Listeners: Multiple listeners of same language receive same translation
+    end
+```
+
 ## Running the demo
 
 ### Run the agent
@@ -43,7 +90,7 @@ Here's what's happening in this demo:
 - There's a couple known bugs at the moment:
   -  Sometimes joining as a listener ends up showing the agent as the host and things look broken. A refresh and rejoin should fix it.
   -  Opening more than one browser window and connecting a host and one-or-more listeners somehow degrades STT performance. Not sure why yet.
-- You can easily extend this demo to support other languages by editing the [list of languages](https://github.com/livekit-examples/live-translated-captioning/blob/2e7acc16e7e482d4c34d7b6673343e5b33f96455/server/main.py#L36) in the agent code.
+- You can easily extend this demo to support other languages by editing the [list of languages](/server/main.py#L36) in the agent code.
 
 ## Misc
 For a more general overview of LiveKit Agents and the full set of capabilities, documentation is here: [https://docs.livekit.io/agents/](https://docs.livekit.io/agents/)

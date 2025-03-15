@@ -14,8 +14,8 @@ Here's what's happening in this demo:
 
 1. When a new LiveKit room is created via a user joining a "party", an agent joins the party on the backend and subscribes to the host user's microphone stream. If no host is present, the agent will wait for one to arrive and subscribe to their mic stream.
 2. When the host speaks, the agent receives their speech stream and runs it through a speech-to-text process to transcribe it to text. This demo currently uses Deepgram for transcriptions, but any STT provider can be used.
-3. By default, every user's (including the host's) target language for captions is set to English. Thus, transcriptions coming out of STT will be sent to every user via [STTForwarder](https://docs.livekit.io/agents/voice-agent/transcriptions/#sttsegmentsforwarder).
-4. If there are any users (including the host) connected to this session that have set their target language to a language other than English (currently the demo supports English, French, German, Spanish, and Japanese), the agent will additionally feed transcriptions coming from STT to a [Translator](https://github.com/livekit/live-translated-captioning/blob/aea6bae217a462614252f6b84232a337b7ac0f84/server/main.py#L34) for that target language.
+3. By default, every user's (including the host's) target language for captions is set to English.
+4. If there are any users (including the host) connected to this session that have set their target language to a language other than English (currently the demo supports English, French, German, Spanish, and Japanese), the agent will additionally feed transcriptions coming from STT to a [Translator](/server/main.py#L34) for that target language.
 5. The translator will take the text from STT and pass it as part of a prompt to an LLM, asking the LLM to translate the text to the target language.
 6. The output from the LLM is then sent to users via STTForwarder and rendered by the client application.
 

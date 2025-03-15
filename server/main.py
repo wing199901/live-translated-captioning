@@ -52,19 +52,31 @@ class Translator:
         """Initialize translator for a specific language."""
         self.room = room
         self.lang = lang
-        self.context = llm.ChatContext().add_message(
+        
+        # Create a ChatContext first
+        self.context = llm.ChatContext()
+        # Then add the system message to it
+        self.context.add_message(
             role="system",
-            content=(
-                f"You are a translator for language: {lang.value}"
-                f"Your only response should be the exact translation of input text in the {lang.value} language ."
-            ),
+            content=f"You are a translator for language: {lang.value}. "
+                   f"Your only response should be the exact translation of input text in the {lang.value} language."
         )
         self.llm = openai.LLM()
 
     async def translate(self, message: str, track: rtc.Track):
         """Translate message to target language and publish transcription."""
-        self.context.append(text=message, role="user")
+        logger.info("aaaaaaaaaa translate(%s)", message)
+
+        # Add the user message to the existing context
+        self.context.add_message(
+            role="user",
+            content=message
+        )
+        logger.info("self.context.append(: %s", message)
+        
         stream = self.llm.chat(chat_ctx=self.context)
+        logger.info("bbbbbbbbbb translate(...) %s", stream)
+
 
         translated_message = ""
         async for chunk in stream:
@@ -73,9 +85,10 @@ class Translator:
                 break
             translated_message += content
 
-        print("======== translate ==========")
-        print(translated_message)
-        print("======== translate ==========")
+        logger.info("======== translate ==========")
+        logger.info(translated_message)
+        logger.info("======== translate ==========")
+
         segment = rtc.TranscriptionSegment(
             id=utils.misc.shortuuid("SG_"),
             text=translated_message,
@@ -121,6 +134,7 @@ async def entrypoint(ctx: JobContext):
                 print(" -> ", ev.alternatives[0].text)
 
                 message = ev.alternatives[0].text
+                logger.info("get translators: %s", translators)
                 for translator in translators.values():
                     asyncio.create_task(translator.translate(message, track))
 
@@ -153,15 +167,19 @@ async def entrypoint(ctx: JobContext):
     def on_attributes_changed(
         changed_attributes: dict[str, str], participant: rtc.Participant
     ):
+        logger.info("on_attributes_changed: %s", changed_attributes)
         """
         When participant attributes change, handle new translation requests.
         """
         lang = changed_attributes.get("captions_language", None)
+        logger.info("lang: %s", lang)
         if lang and lang != LanguageCode.en.name and lang not in translators:
             try:
+                logger.info("try: %s", lang)
                 # Create a translator for the requested language
                 target_language = LanguageCode[lang].value
                 translators[lang] = Translator(ctx.room, LanguageCode[lang])
+                logger.info("set translators: %s", translators)
                 logger.info(f"Added translator for language: {target_language}")
             except KeyError:
                 logger.warning(f"Unsupported language requested: {lang}")

@@ -1,16 +1,9 @@
-# uses agent code from https://github.com/livekit/agents/blob/dev-1.0
 python-dotenv
 
-# Livekit
+# Livekit Core API
 livekit
 
-# Agent DEV-1.0
-git+https://github.com/livekit/agents.git@dev-1.0#subdirectory=livekit-agents
-
-
-# Plugins DEV-1.0
-git+https://github.com/livekit/agents.git@dev-1.0#subdirectory=livekit-plugins/livekit-plugins-openai
-git+https://github.com/livekit/agents.git@dev-1.0#subdirectory=livekit-plugins//livekit-plugins-deepgram
-git+https://github.com/livekit/agents.git@dev-1.0#subdirectory=livekit-plugins/livekit-plugins-silero
-git+https://github.com/livekit/agents.git@dev-1.0#subdirectory=livekit-plugins/livekit-plugins-cartesia
-# git+https://github.com/livekit/agents.git@dev-1.0#subdirectory=livekit-plugins/livekit-plugins-elevenlabs
+# Livekit Agents locked to specific commit
+git+https://github.com/livekit/agents.git@9f8c961#subdirectory=livekit-agents
+git+https://github.com/livekit/agents.git@9f8c961#subdirectory=livekit-plugins/livekit-plugins-openai
+git+https://github.com/livekit/agents.git@9f8c961#subdirectory=livekit-plugins//livekit-plugins-deepgram

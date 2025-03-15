@@ -77,13 +77,21 @@ class Translator:
         stream = self.llm.chat(chat_ctx=self.context)
         logger.info("bbbbbbbbbb translate(...) %s", stream)
 
-
         translated_message = ""
-        async for chunk in stream:
-            content = chunk.choices[0].delta.content
-            if content is None:
-                break
-            translated_message += content
+        try:
+            async for chunk in stream:
+                logger.info("Processing chunk: %s", chunk)
+                
+                # Access delta directly from the chunk
+                if not chunk.delta or not chunk.delta.content:
+                    continue
+                    
+                translated_message += chunk.delta.content or ""
+                logger.info("Current translation: %s", translated_message)
+                
+        except Exception as e:
+            logger.error("Error processing translation stream: %s", str(e))
+            return
 
         logger.info("======== translate ==========")
         logger.info(translated_message)

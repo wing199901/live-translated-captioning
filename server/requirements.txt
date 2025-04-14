@@ -1,9 +1,10 @@
 python-dotenv
 
-# Livekit Core API
+# LiveKit Core API
 livekit
 
-# Livekit Agents locked to specific commit
-git+https://github.com/livekit/agents.git@9f8c961#subdirectory=livekit-agents
-git+https://github.com/livekit/agents.git@9f8c961#subdirectory=livekit-plugins/livekit-plugins-openai
-git+https://github.com/livekit/agents.git@9f8c961#subdirectory=livekit-plugins//livekit-plugins-deepgram
+# LiveKit Agents
+livekit-agents>=1.0.0rc
+livekit-plugins-openai>=1.0.0rc
+livekit-plugins-deepgram>=1.0.0rc
+livekit-plugins-silero>=1.0.0rc

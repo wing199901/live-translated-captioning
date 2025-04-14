@@ -4,7 +4,7 @@ python-dotenv
 livekit
 
 # LiveKit Agents
-livekit-agents>=1.0.0rc
-livekit-plugins-openai>=1.0.0rc
-livekit-plugins-deepgram>=1.0.0rc
-livekit-plugins-silero>=1.0.0rc
+livekit-agents>=1.0.0
+livekit-plugins-openai>=1.0.0
+livekit-plugins-deepgram>=1.0.0
+livekit-plugins-silero>=1.0.0

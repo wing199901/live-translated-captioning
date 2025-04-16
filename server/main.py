@@ -17,8 +17,9 @@ from livekit.agents import (
     llm,
     transcription,
     utils,
+    WorkerPermissions
 )
-from livekit.plugins import openai, silero, deepgram
+from livekit.plugins import azure, silero, openai
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,6 +40,7 @@ languages = {
     "fr": Language(code="fr", name="French", flag="🇫🇷"),
     "de": Language(code="de", name="German", flag="🇩🇪"),
     "ja": Language(code="ja", name="Japanese", flag="🇯🇵"),
+    "zh-HK": Language(code="zh-HK", name="Cantonese", flag="🇭🇰"),
 }
 
 LanguageCode = Enum(
@@ -58,7 +60,10 @@ class Translator:
                 f"Your only response should be the exact translation of input text in the {lang.value} language ."
             ),
         )
-        self.llm = openai.LLM()
+        self.llm = openai.LLM.with_azure(
+            model="gpt-4o-mini",
+            temperature=0.8
+        )
 
     async def translate(self, message: str, track: rtc.Track):
         self.context.append(text=message, role="user")
@@ -94,7 +99,7 @@ def prewarm(proc: JobProcess):
 
 
 async def entrypoint(job: JobContext):
-    stt_provider = deepgram.STT()
+    stt_provider = azure.STT()
     tasks = []
     translators = {}
 
@@ -111,6 +116,7 @@ async def entrypoint(job: JobContext):
                 print(ev.alternatives[0].text, end="")
             elif ev.type == stt.SpeechEventType.FINAL_TRANSCRIPT:
                 print("\n")
+                print(ev.alternatives[0].language, end="")
                 print(" -> ", ev.alternatives[0].text)
 
                 message = ev.alternatives[0].text
@@ -138,25 +144,44 @@ async def entrypoint(job: JobContext):
         participant: rtc.RemoteParticipant,
     ):
         if track.kind == rtc.TrackKind.KIND_AUDIO:
-            logger.info(f"Adding transcriber for participant: {participant.identity}")
-            tasks.append(asyncio.create_task(transcribe_track(participant, track)))
+            logger.info(
+                f"Adding transcriber for participant: {participant.identity}")
+            tasks.append(asyncio.create_task(
+                transcribe_track(participant, track)))
 
     @job.room.on("participant_attributes_changed")
     def on_attributes_changed(
         changed_attributes: dict[str, str], participant: rtc.Participant
     ):
+
+        source_lang = changed_attributes.get("source_language", None)
+        if source_lang:
+            try:
+                target_language = LanguageCode[source_lang].value
+                stt_provider.update_options(
+                    language=source_lang,
+                )
+                logger.info(
+                    f"Updated STT for language: {target_language}")
+            except KeyError:
+                logger.warning(
+                    f"Unsupported language requested: {source_lang}")
+
         """
         When participant attributes change, handle new translation requests.
         """
-        lang = changed_attributes.get("captions_language", None)
-        if lang and lang != LanguageCode.en.name and lang not in translators:
+        captions_lang = changed_attributes.get("captions_language", None)
+        if captions_lang and captions_lang not in translators:
             try:
                 # Create a translator for the requested language
-                target_language = LanguageCode[lang].value
-                translators[lang] = Translator(job.room, LanguageCode[lang])
-                logger.info(f"Added translator for language: {target_language}")
+                target_language = LanguageCode[captions_lang].value
+                translators[captions_lang] = Translator(
+                    job.room, LanguageCode[captions_lang])
+                logger.info(
+                    f"Added translator for language: {target_language}")
             except KeyError:
-                logger.warning(f"Unsupported language requested: {lang}")
+                logger.warning(
+                    f"Unsupported language requested: {captions_lang}")
 
     await job.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
@@ -176,6 +201,11 @@ async def request_fnc(req: JobRequest):
 if __name__ == "__main__":
     cli.run_app(
         WorkerOptions(
-            entrypoint_fnc=entrypoint, prewarm_fnc=prewarm, request_fnc=request_fnc
+            entrypoint_fnc=entrypoint,
+            prewarm_fnc=prewarm,
+            request_fnc=request_fnc,
+            permissions=WorkerPermissions(
+                hidden=True
+            )
         )
     )

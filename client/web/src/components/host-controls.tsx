@@ -3,7 +3,7 @@
 import MicToggle from "@/components/controls/mic-toggle";
 import LeaveButton from "@/components/controls/leave-button";
 import CaptionsToggle from "@/components/controls/captions-toggle";
-import LanguageSelect from "@/components/controls/language-select";
+import CaptionsLanguageSelect from "@/components/controls/captions-language-select";
 import DeviceSelector from "@/components/controls/device-selector";
 
 export default function HostControls() {
@@ -12,7 +12,7 @@ export default function HostControls() {
       <DeviceSelector />
       <MicToggle />
       <CaptionsToggle />
-      <LanguageSelect />
+      <CaptionsLanguageSelect />
       <LeaveButton />
     </div>
   );

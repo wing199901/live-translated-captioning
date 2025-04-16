@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 
 import {
   Select,
@@ -7,9 +7,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useRoomContext, useVoiceAssistant } from "@livekit/components-react";
+import { useRoomContext, useConnectionState } from "@livekit/components-react";
 import { usePartyState } from "@/hooks/usePartyState";
-import { ConnectionState } from "livekit-client";
 
 interface Language {
   code: string;
@@ -17,9 +16,9 @@ interface Language {
   flag: string;
 }
 
-const LanguageSelect = () => {
+const CaptionsLanguageSelect = () => {
   const room = useRoomContext();
-  const { agent } = useVoiceAssistant();
+  const connectionState = useConnectionState(room);
   const { state, dispatch } = usePartyState();
   const [languages, setLanguages] = useState<Language[]>([]);
 
@@ -48,10 +47,10 @@ const LanguageSelect = () => {
       }
     }
 
-    if (agent) {
+    if (connectionState === "connected") {
       getLanguages();
     }
-  }, [room, agent]);
+  }, [room, connectionState]);
 
   return (
     <div className="flex items-center">
@@ -75,4 +74,4 @@ const LanguageSelect = () => {
   );
 };
 
-export default LanguageSelect;
+export default CaptionsLanguageSelect;
